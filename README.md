@@ -709,15 +709,8 @@
     </div>
 
     <script>
-        // Google Sheets URL with CORS proxy
+        // Direct CSV URL with CORS proxy
         const CSV_URL = 'https://cors.isomorphic-git.org/https://docs.google.com/spreadsheets/d/e/2PACX-1vRLSItYYsNpWlUh_5V9MjoyV35Hgc3V_t_7PmrNWv_YE36ifuhmE7m_Lswq7Xp19nD-BJ90485rbv8Q/pub?output=csv';
-        
-        // CORS Proxy alternatives (fallback options)
-        const CORS_PROXIES = [
-            CSV_URL, // Primary CORS proxy
-            'https://api.allorigins.win/get?url=' + encodeURIComponent('https://docs.google.com/spreadsheets/d/e/2PACX-1vRLSItYYsNpWlUh_5V9MjoyV35Hgc3V_t_7PmrNWv_YE36ifuhmE7m_Lswq7Xp19nD-BJ90485rbv8Q/pub?output=csv'),
-            'https://corsproxy.io/?' + encodeURIComponent('https://docs.google.com/spreadsheets/d/e/2PACX-1vRLSItYYsNpWlUh_5V9MjoyV35Hgc3V_t_7PmrNWv_YE36ifuhmE7m_Lswq7Xp19nD-BJ90485rbv8Q/pub?output=csv')
-        ];
         
         let activitiesData = [];
         let filteredData = [];
@@ -900,61 +893,41 @@
             }, 6000);
         }
 
-        // Try multiple CORS proxy services
-        async function tryFetchWithCORSProxy(proxyIndex = 0) {
-            if (proxyIndex >= CORS_PROXIES.length) {
-                throw new Error('Semua proxy CORS gagal');
+        // Fetch CSV data using CORS proxy
+        async function fetchCSVData() {
+            console.log('🔄 Mengambil data dari Google Sheets...');
+            console.log('📊 CSV URL:', CSV_URL);
+            
+            const response = await fetch(CSV_URL, {
+                method: 'GET',
+                headers: {
+                    'Accept': 'text/csv,text/plain,*/*',
+                    'Cache-Control': 'no-cache'
+                },
+                mode: 'cors'
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status} - ${response.statusText}`);
             }
             
-            const proxyUrl = CORS_PROXIES[proxyIndex];
-            console.log(`Trying proxy ${proxyIndex + 1}/${CORS_PROXIES.length}:`, proxyUrl);
+            const csvText = await response.text();
             
-            try {
-                const response = await fetch(proxyUrl, {
-                    method: 'GET',
-                    headers: {
-                        'Accept': 'text/csv,text/plain,*/*',
-                        'Cache-Control': 'no-cache'
-                    },
-                    mode: 'cors'
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status} - ${response.statusText}`);
-                }
-                
-                let csvText;
-                
-                // Handle different proxy response formats
-                if (proxyUrl.includes('allorigins.win')) {
-                    const jsonResponse = await response.json();
-                    csvText = jsonResponse.contents;
-                } else {
-                    csvText = await response.text();
-                }
-                
-                // Check if it's valid CSV data
-                if (!csvText || csvText.trim().length === 0) {
-                    throw new Error('Data kosong');
-                }
-                
-                // Check if it contains error messages from proxy
-                if (csvText.includes('Error') || csvText.includes('Access denied') || csvText.includes('<!DOCTYPE')) {
-                    throw new Error('Proxy mengembalikan error');
-                }
-                
-                console.log(`✅ Berhasil dengan proxy ${proxyIndex + 1}`);
-                return csvText;
-                
-            } catch (error) {
-                console.warn(`❌ Proxy ${proxyIndex + 1} gagal:`, error.message);
-                
-                // Try next proxy
-                return await tryFetchWithCORSProxy(proxyIndex + 1);
+            // Check if it's valid CSV data
+            if (!csvText || csvText.trim().length === 0) {
+                throw new Error('Data kosong');
             }
+            
+            // Check if it contains error messages
+            if (csvText.includes('Error') || csvText.includes('Access denied') || csvText.includes('<!DOCTYPE')) {
+                throw new Error('Gagal mengakses data');
+            }
+            
+            console.log('✅ Data berhasil diambil');
+            return csvText;
         }
 
-        // Fetch data from Google Sheets CSV with CORS bypass
+        // Fetch data from Google Sheets CSV
         async function fetchActivitiesData() {
             if (isLoading) return;
             
@@ -972,35 +945,20 @@
             refreshBtn.disabled = true;
             
             try {
-                console.log('🔄 Mencoba mengambil data dari Google Sheets...');
-                console.log('📊 CSV URL:', CSV_URL);
-                
-                // Try to fetch data using CORS proxies
-                const csvText = await tryFetchWithCORSProxy();
+                const csvText = await fetchCSVData();
                 
                 console.log('📄 CSV text length:', csvText.length);
                 console.log('📝 CSV preview:', csvText.substring(0, 500));
                 
-                if (!csvText || csvText.trim().length === 0) {
-                    throw new Error('Data CSV kosong atau tidak dapat dibaca');
-                }
-                
-                // Check if it's actually CSV data
                 if (!csvText.includes(',') && !csvText.includes('\n')) {
                     throw new Error('Data bukan format CSV yang valid');
                 }
                 
                 activitiesData = parseCSV(csvText);
                 console.log('✅ Parsed activities data:', activitiesData.length, 'entries');
-                console.log('📋 Sample parsed data:', activitiesData.slice(0, 3));
                 
                 if (activitiesData.length === 0) {
-                    console.warn('⚠️ No activities data found after parsing');
-                    console.log('🔍 Raw CSV for debugging:', csvText);
-                    // Load sample data for testing
-                    loadSampleData();
-                    showConnectionStatus(false, 'Data Google Sheets kosong atau format tidak sesuai', 0);
-                    return;
+                    throw new Error('Tidak ada data kegiatan yang ditemukan');
                 }
                 
                 // Sort data by date
@@ -1017,27 +975,12 @@
                 
             } catch (error) {
                 console.error('❌ Error fetching data:', error.message);
-                console.error('🔍 Full error:', error);
                 
-                // Load sample data as fallback
-                loadSampleData();
+                // Show error message in table
+                showErrorMessage('Gagal memuat data kegiatan. Coba refresh halaman.');
                 
-                // Show error notification with specific error message
-                let errorMessage = 'Tidak dapat terhubung ke Google Sheets';
-                if (error.message.includes('HTTP')) {
-                    errorMessage = `Server error: ${error.message}`;
-                } else if (error.message.includes('fetch') || error.message.includes('CORS')) {
-                    errorMessage = 'Masalah CORS - coba refresh beberapa kali';
-                } else if (error.message.includes('CSV') || error.message.includes('kosong')) {
-                    errorMessage = 'Format data tidak valid atau kosong';
-                } else if (error.message.includes('proxy')) {
-                    errorMessage = 'Semua proxy CORS tidak tersedia';
-                } else {
-                    errorMessage = error.message;
-                }
-                
-                showConnectionStatus(false, errorMessage, 0);
-                showErrorMessage(`Gagal memuat data: ${error.message}. Menampilkan data contoh.`);
+                // Show error notification
+                showConnectionStatus(false, 'Gagal memuat data kegiatan', 0);
             } finally {
                 isLoading = false;
                 refreshBtn.innerHTML = originalText;
@@ -1045,36 +988,7 @@
             }
         }
 
-        // Load sample data for testing
-        function loadSampleData() {
-            console.log('Loading sample data...');
-            activitiesData = [
-                {
-                    tanggal: '2025-01-15',
-                    namaKegiatan: 'Upacara Bendera Hari Senin',
-                    keterangan: 'Upacara rutin setiap hari Senin',
-                    namaPenginput: 'Admin Sekolah'
-                },
-                {
-                    tanggal: '2025-01-20',
-                    namaKegiatan: 'Ujian Tengah Semester',
-                    keterangan: 'UTS untuk semua kelas',
-                    namaPenginput: 'Guru Kelas 6'
-                },
-                {
-                    tanggal: '2025-01-25',
-                    namaKegiatan: 'Rapat Orang Tua Siswa',
-                    keterangan: 'Pembahasan program semester genap',
-                    namaPenginput: 'Kepala Sekolah'
-                }
-            ];
-            
-            filteredData = [...activitiesData];
-            renderActivitiesTable();
-            updateLastUpdateTime();
-            
-            console.log('Sample data loaded:', activitiesData.length, 'activities');
-        }
+
 
         // Filter data by month
         function filterByMonth() {
@@ -1209,7 +1123,7 @@
                     <td colspan="5" class="text-center py-12">
                         <div class="text-6xl mb-4">⚠️</div>
                         <h3 class="text-xl font-semibold text-red-600 mb-2">Error</h3>
-                        <p class="text-gray-600">${message}</p>
+                        <p class="text-red-500 font-medium">${message}</p>
                     </td>
                 </tr>
             `;
@@ -1275,5 +1189,5 @@
             });
         });
     </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'98a225ee7429445e',t:'MTc1OTcyMjE0MC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'98a22ab5a65ad176',t:'MTc1OTcyMjMzNS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
