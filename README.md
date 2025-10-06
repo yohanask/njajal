@@ -48,7 +48,7 @@
     <meta http-equiv="Permissions-Policy" content="geolocation=(), microphone=(), camera=()">
     
     <!-- Content Security Policy -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self' https:; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https: data:; connect-src 'self' https://docs.google.com; frame-src 'none'; object-src 'none'; base-uri 'self';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' https:; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https: data:; connect-src 'self' https://docs.google.com https://cors.isomorphic-git.org; frame-src 'none'; object-src 'none'; base-uri 'self';">
     
     <!-- Canonical URL -->
     <link rel="canonical" href="https://sdnkarangmangu-agenda.canva.site/">
@@ -709,14 +709,14 @@
     </div>
 
     <script>
-        // Google Sheets URLs - Using your new provided link
-        const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRLSItYYsNpWlUh_5V9MjoyV35Hgc3V_t_7PmrNWv_YE36ifuhmE7m_Lswq7Xp19nD-BJ90485rbv8Q/pub?output=csv';
+        // Google Sheets URL with CORS proxy
+        const CSV_URL = 'https://cors.isomorphic-git.org/https://docs.google.com/spreadsheets/d/e/2PACX-1vRLSItYYsNpWlUh_5V9MjoyV35Hgc3V_t_7PmrNWv_YE36ifuhmE7m_Lswq7Xp19nD-BJ90485rbv8Q/pub?output=csv';
         
         // CORS Proxy alternatives (fallback options)
         const CORS_PROXIES = [
-            `https://api.allorigins.win/get?url=${encodeURIComponent(CSV_URL)}`,
-            `https://corsproxy.io/?${encodeURIComponent(CSV_URL)}`,
-            CSV_URL // Direct URL as last resort
+            CSV_URL, // Primary CORS proxy
+            'https://api.allorigins.win/get?url=' + encodeURIComponent('https://docs.google.com/spreadsheets/d/e/2PACX-1vRLSItYYsNpWlUh_5V9MjoyV35Hgc3V_t_7PmrNWv_YE36ifuhmE7m_Lswq7Xp19nD-BJ90485rbv8Q/pub?output=csv'),
+            'https://corsproxy.io/?' + encodeURIComponent('https://docs.google.com/spreadsheets/d/e/2PACX-1vRLSItYYsNpWlUh_5V9MjoyV35Hgc3V_t_7PmrNWv_YE36ifuhmE7m_Lswq7Xp19nD-BJ90485rbv8Q/pub?output=csv')
         ];
         
         let activitiesData = [];
@@ -748,8 +748,26 @@
                 const line = lines[i].trim();
                 if (line) {
                     try {
-                        // Simple CSV parsing - split by comma and clean quotes
-                        let columns = line.split(',').map(col => col.replace(/^"|"$/g, '').trim());
+                        // Better CSV parsing - handle quoted fields with commas
+                        let columns = [];
+                        let current = '';
+                        let inQuotes = false;
+                        
+                        for (let j = 0; j < line.length; j++) {
+                            const char = line[j];
+                            if (char === '"') {
+                                inQuotes = !inQuotes;
+                            } else if (char === ',' && !inQuotes) {
+                                columns.push(current.trim());
+                                current = '';
+                            } else {
+                                current += char;
+                            }
+                        }
+                        columns.push(current.trim()); // Add last column
+                        
+                        // Clean quotes from columns
+                        columns = columns.map(col => col.replace(/^"|"$/g, '').trim());
                         
                         console.log(`Line ${i} columns (${columns.length}):`, columns);
                         
@@ -883,7 +901,7 @@
         }
 
         // Try multiple CORS proxy services
-        async function tryFetchWithCORSProxy(url, proxyIndex = 0) {
+        async function tryFetchWithCORSProxy(proxyIndex = 0) {
             if (proxyIndex >= CORS_PROXIES.length) {
                 throw new Error('Semua proxy CORS gagal');
             }
@@ -932,7 +950,7 @@
                 console.warn(`❌ Proxy ${proxyIndex + 1} gagal:`, error.message);
                 
                 // Try next proxy
-                return await tryFetchWithCORSProxy(url, proxyIndex + 1);
+                return await tryFetchWithCORSProxy(proxyIndex + 1);
             }
         }
 
@@ -955,10 +973,10 @@
             
             try {
                 console.log('🔄 Mencoba mengambil data dari Google Sheets...');
-                console.log('📊 Sheet ID:', SHEET_ID);
+                console.log('📊 CSV URL:', CSV_URL);
                 
                 // Try to fetch data using CORS proxies
-                const csvText = await tryFetchWithCORSProxy(CSV_URL);
+                const csvText = await tryFetchWithCORSProxy();
                 
                 console.log('📄 CSV text length:', csvText.length);
                 console.log('📝 CSV preview:', csvText.substring(0, 500));
@@ -967,12 +985,18 @@
                     throw new Error('Data CSV kosong atau tidak dapat dibaca');
                 }
                 
+                // Check if it's actually CSV data
+                if (!csvText.includes(',') && !csvText.includes('\n')) {
+                    throw new Error('Data bukan format CSV yang valid');
+                }
+                
                 activitiesData = parseCSV(csvText);
                 console.log('✅ Parsed activities data:', activitiesData.length, 'entries');
                 console.log('📋 Sample parsed data:', activitiesData.slice(0, 3));
                 
                 if (activitiesData.length === 0) {
                     console.warn('⚠️ No activities data found after parsing');
+                    console.log('🔍 Raw CSV for debugging:', csvText);
                     // Load sample data for testing
                     loadSampleData();
                     showConnectionStatus(false, 'Data Google Sheets kosong atau format tidak sesuai', 0);
@@ -1251,5 +1275,5 @@
             });
         });
     </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'98a1f501969dfd89',t:'MTc1OTcyMDEzNi4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'98a225ee7429445e',t:'MTc1OTcyMjE0MC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
